@@ -6,8 +6,10 @@ library(tidytext)
 library(dplyr)
 library(gbm)
 library(topicmodels)
+library(ggplot2)
+library(xgboost)
 set.seed(1)
-
+setwd('/projetos/machine-learning-challenge-2/')
 train <- fread("train.csv")
 test <- fread("test.csv")
 
@@ -133,3 +135,121 @@ mean(subst$final_status)
 
 fwrite(subst, "gbm.csv")
 View(test)
+
+
+#análise de correlação
+library(corrplot)
+num_col <- colnames(train)[sapply(train, is.numeric)]
+num_col <- num_col[-colnames(train)[sapply(train, is.POSIXct)]]
+corrplot::corrplot(cor(train[,cols_to_use]),method = "number")
+#colunas ruins:
+#lifespan
+#name count
+#keyword count
+#incomeRate
+
+#### XGBOOST
+cols_to_use <- c('sentiment_score'
+                 ,'prep_time'
+                 #,'lifespan'
+                 ,'duration'
+                 ,'extratime'
+                 ,'dollarValue'
+                 #,'incomeRate' #0.67276!!
+                 ,'name_len','desc_len','keywords_len' #0.67068
+                 #,'name_count'
+                 ,'desc_count'
+                 ,'topic'
+                 #,'keywords_count'
+)
+dtrain = xgb.DMatrix(data = as.matrix(train[,cols_to_use]), label = as.matrix(train$final_status))
+
+my_xgb <- xgboost(data = dtrain,
+                  #label = train$final_status,
+                  eta = 0.01,
+                  max_depth = 15,
+                  nround = 500,
+                  subsample = 0.6,
+                  colsample_bytree = 0.6,
+                  seed = 1,
+                  #eval_metric = "merror",
+                  eval_metric="auc",
+                  objective = "binary:logistic",
+                  early_stopping_rounds = 15
+                  #num_class = 12,
+                  #nthread = 3
+)
+summary(my_xgb)
+preds <- predict(my_xgb, data.matrix(test[cols_to_use]))
+
+importance_matrix <- xgb.importance(feature_names = cols_to_use, model = my_xgb)
+print(importance_matrix)
+xgb.ggplot.importance(importance_matrix = importance_matrix)
+
+xgb_subst <- data.table(project_id = test$project_id, final_status = ifelse(preds > 0.4,1,0)) #0.69312
+fwrite(xgb_subst, "xgb.csv")
+
+#novas features
+my_sample = sample_n(train, 100)
+
+##remover tudo que não presta dos textos:
+limparTexto <- function(data) {
+  data <- gsub("\"", "", data)#984
+  data <- gsub("[^[:alnum:]]", " ", data)#984
+  data <- gsub("  ", " ", data)#984
+  data
+}
+limparTexto(train$desc)
+
+
+##ticket medio
+#okSample <- sample_n(filter(train, final_status == 1), 1000)
+okSample <- filter(train, final_status == 1)
+ticketMedio <- okSample$dollarValue / okSample$backers_count
+qplot(ticketMedio, bins = 1500)
+
+##principal topico
+classify_project <- function(data) {
+  print('trabalhando palavras')
+  
+  data$desc <- limparTexto(paste(data$desc, data$name, data$keywords))
+  
+  words <- data %>%
+    unnest_tokens(word, desc) %>%
+    anti_join(., stop_words) %>%
+    mutate(word = str_extract(word, "[a-z']+")) %>%
+    filter(!is.na(word)) %>%
+    count(project_id, word, sort = TRUE) %>%
+    ungroup()
+  #words
+  
+  print('criando dtm') 
+  project_dtm <- words %>%
+    cast_dtm(project_id, word, n)
+  
+  print('calculando LDA - 7 classes') 
+  projects_lda <- LDA(project_dtm, k = 7, control = list(seed = 1234))
+  #projects_lda
+  
+  print('criando tópicos - gamma')
+  project_topics <- tidy(projects_lda, matrix = "gamma")#beta
+  #View(project_topics)
+  
+  print('gerando classificações')
+  project_classifications <- project_topics %>%
+    group_by(document) %>%
+    top_n(1, gamma) %>%
+    ungroup()
+  project_classifications
+}
+
+train_classifications <- classify_project(train)
+train_classifications$project_id <- train_classifications$document
+train <- train %>% 
+  inner_join(train_classifications)
+
+hist(train$topic)
+x <- train %>%
+  group_by(topic, country) %>%
+  summarise(topicTicketMedio = (sum(dollarValue, na.rm = TRUE)) / sum(backers_count, na.rm = TRUE))
+x
