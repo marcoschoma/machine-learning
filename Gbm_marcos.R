@@ -43,8 +43,17 @@ my_currency <- data.frame(currencies, currency_mean, stringsAsFactors = FALSE)
 # 
 # n_rolou = filter(train, final_status == 0 )
 # n_rolou$aoMesmoTempo <- with(n_rolou, as.numeric(difftime(deadline, state_changed_at, units = c("secs"))) ==0)
-# 
 # mean(n_rolou$aoMesmoTempo)
+# 
+# n_rolou$antes <- with(n_rolou, as.numeric(difftime(deadline, state_changed_at, units = c("days"))) > 0)
+# 
+# test %>% filter(str_detect(desc, '(Canceled)')) %>% summarise(n())
+# 
+# n_rolou[grep('(Canceled)', n_rolou$desc),]
+# 
+# mean(n_rolou$antes)
+# 
+# n_rolou[25,]
 # 
 # with(n_rolou, abs(as.numeric(difftime(deadline, state_changed_at, units = c("secs")))))
 # mean(with(n_rolou, abs(as.numeric(difftime(deadline, state_changed_at, units = c("secs"))))))
@@ -54,11 +63,11 @@ my_currency <- data.frame(currencies, currency_mean, stringsAsFactors = FALSE)
 #dates features
 createFeatures <- function(data) {
   data$prep_time <- as.numeric(difftime(data$created_at, data$launched_at, units = c("days")))
-  data$lifespan <- as.numeric(difftime(data$deadline, data$created_at, units = c("days")))
+  #data$lifespan <- as.numeric(difftime(data$deadline, data$created_at, units = c("days")))
   data$duration <- as.numeric(difftime(data$deadline, data$launched_at, units = c("days")))
   data$extratime <- as.numeric(difftime(data$deadline, data$state_changed_at, units = c("days")))
   
-  data$probablyCanceled <- as.numeric(difftime(data$deadline, data$state_changed_at, units = c("days")))
+  data$probablyCanceled <- as.numeric(difftime(data$deadline, data$state_changed_at, units = c("days")) > 0)
   
   data$disable_communication <- as.integer(as.factor(data$disable_communication))-1
   data <- data %>% left_join(my_currency, c('currency' = 'currencies')) %>%
@@ -159,8 +168,15 @@ cols_to_use <- c('sentiment_score'
                  ,'name_len','desc_len','keywords_len' #0.67068
                  #,'name_count'
                  ,'desc_count'
-                 ,'topic'
                  #,'keywords_count'
+                 #,'topic'
+                 ,'as.factor.topic.1'
+                 ,'as.factor.topic.2'
+                 ,'as.factor.topic.3'
+                 ,'as.factor.topic.4'
+                 ,'as.factor.topic.5'
+                 ,'as.factor.topic.6'
+                 ,'as.factor.topic.7'
 )
 dtrain = xgb.DMatrix(data = as.matrix(train[,cols_to_use]), label = as.matrix(train$final_status))
 
@@ -187,6 +203,7 @@ print(importance_matrix)
 xgb.ggplot.importance(importance_matrix = importance_matrix)
 
 xgb_subst <- data.table(project_id = test$project_id, final_status = ifelse(preds > 0.4,1,0)) #0.69312
+mean(xgb_subst$final_status)
 fwrite(xgb_subst, "xgb.csv")
 
 #novas features
@@ -248,8 +265,29 @@ train_classifications$project_id <- train_classifications$document
 train <- train %>% 
   inner_join(train_classifications)
 
+
+test_classifications <- classify_project(test)
+test_classifications$project_id <- test_classifications$document
+test <- test %>% 
+  inner_join(test_classifications)
+
+
+train <- with(train, data.frame(train, model.matrix(~as.factor(topic)-1,train)))
+test <- with(test, data.frame(test, model.matrix(~as.factor(topic)-1,test)))
+
+testTrain[1,]
+
 hist(train$topic)
 x <- train %>%
   group_by(topic, country) %>%
   summarise(topicTicketMedio = (sum(dollarValue, na.rm = TRUE)) / sum(backers_count, na.rm = TRUE))
 x
+
+my_sample$launchHour <- hour(my_sample$launched_at)
+qplot(data = my_sample, x = launchHour, facets = final_status~., geom = "histogram", bins = 24)
+my_sample$createHour <- hour(my_sample$created_at)
+qplot(data = my_sample, x = createHour, facets = final_status~., geom = "histogram", bins = 24)
+
+my_sample[1,]
+hour(my_sample$launched_at)
+train$deadline
