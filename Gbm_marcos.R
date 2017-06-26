@@ -62,22 +62,29 @@ my_currency <- data.frame(currencies, currency_mean, stringsAsFactors = FALSE)
 
 #dates features
 createFeatures <- function(data) {
-  data$prep_time <- as.numeric(difftime(data$created_at, data$launched_at, units = c("days")))
+  data$prep_time <- as.numeric(difftime(data$launched_at, data$created_at, units = c("days")))
   #data$lifespan <- as.numeric(difftime(data$deadline, data$created_at, units = c("days")))
   data$duration <- as.numeric(difftime(data$deadline, data$launched_at, units = c("days")))
   data$extratime <- as.numeric(difftime(data$deadline, data$state_changed_at, units = c("days")))
   
   data$probablyCanceled <- as.numeric(difftime(data$deadline, data$state_changed_at, units = c("days")) > 0)
+  data$bin_disable_communication <- as.numeric(data$disable_communication == "true")
+
+  #data$disable_communication <- as.integer(data$disable_communication == "" )
+  currencyJoinedData <- data %>% left_join(my_currency, c('currency' = 'currencies'))
+  data$dollarValue <- as.double(currencyJoinedData$currency_mean) * currencyJoinedData$goal
   
-  data$disable_communication <- as.integer(as.factor(data$disable_communication))-1
-  data <- data %>% left_join(my_currency, c('currency' = 'currencies')) %>%
-    mutate('dollarValue' = as.double(currency_mean) * goal)
+  data$sazonalityStart <- week(rolou$created_at)
+  data$sazonalityEnd <- week(rolou$deadline)
   
   data$incomeRate <- data$dollarValue / data$duration
   data
 }
 train <- createFeatures(train)
 test <- createFeatures(test)
+
+filter(train, bin_disable_communication == 1)
+
 # filter(test, project_id == 'kkst102036154')
 #createFeatures(my_sample)
 # my_sample <- sample_frac(train, 0.01)
@@ -107,7 +114,7 @@ test <- getSentimentScore(test)
 # cols to use in modeling
 cols_to_use <- c('final_status'
                  ,'sentiment_score'
-                 #,'disable_communication'
+                 ,'bin_disable_communication'
                  ,'prep_time'
                  ,'lifespan'
                  ,'duration'
@@ -160,16 +167,14 @@ corrplot::corrplot(cor(train[,cols_to_use]),method = "number")
 #### XGBOOST
 cols_to_use <- c('sentiment_score'
                  ,'prep_time'
-                 #,'lifespan'
                  ,'duration'
                  ,'extratime'
                  ,'dollarValue'
-                 #,'incomeRate' #0.67276!!
                  ,'name_len','desc_len','keywords_len' #0.67068
-                 #,'name_count'
                  ,'desc_count'
-                 #,'keywords_count'
-                 #,'topic'
+                 ,'bin_disable_communication'
+                 ,'sazonalityStart'
+                 ,'sazonalityEnd'
                  ,'as.factor.topic.1'
                  ,'as.factor.topic.2'
                  ,'as.factor.topic.3'
@@ -182,9 +187,9 @@ dtrain = xgb.DMatrix(data = as.matrix(train[,cols_to_use]), label = as.matrix(tr
 
 my_xgb <- xgboost(data = dtrain,
                   #label = train$final_status,
-                  eta = 0.01,
-                  max_depth = 15,
-                  nround = 500,
+                  eta = 0.05,
+                  max_depth = 10,
+                  nround = 1200,
                   subsample = 0.6,
                   colsample_bytree = 0.6,
                   seed = 1,
@@ -206,6 +211,12 @@ xgb_subst <- data.table(project_id = test$project_id, final_status = ifelse(pred
 mean(xgb_subst$final_status)
 fwrite(xgb_subst, "xgb.csv")
 
+names(test)
+filter(test, disable_communication == FALSE)
+nrow(filter(train, disable_communication == "true"))
+nrow(filter(test, disable_communication == "true"))
+train$disable_communication
+
 #novas features
 my_sample = sample_n(train, 100)
 
@@ -217,7 +228,6 @@ limparTexto <- function(data) {
   data
 }
 limparTexto(train$desc)
-
 
 ##ticket medio
 #okSample <- sample_n(filter(train, final_status == 1), 1000)
@@ -291,3 +301,13 @@ qplot(data = my_sample, x = createHour, facets = final_status~., geom = "histogr
 my_sample[1,]
 hour(my_sample$launched_at)
 train$deadline
+
+rolou = filter(train, final_status == 1 )
+hist(x = week(rolou$created_at))
+
+sazonality <- week(rolou$created_at)
+
+nrolou = filter(train, final_status == 0 )
+mfrow = c(2, 1)
+hist(x = week(rolou$created_at))
+hist(x = week(nrolou$created_at))
