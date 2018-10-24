@@ -8,7 +8,7 @@ import time
 from hashlib import md5
 import scipy
 
-IMAGE_DIR = '/home/marcos/Downloads/testeImg'
+IMAGE_DIR = '/home/marcos/Downloads/tmpImage'
 
 os.chdir(IMAGE_DIR)
 os.getcwd()
