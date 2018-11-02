@@ -9,17 +9,18 @@ from pyspark.ml.feature import CountVectorizer
 from pyspark.sql.types import StructField, StringType, StructType
 from pyspark.ml.feature import StopWordsRemover
 
-labels = ["title","body","FROM_UNIXTIME"]
+# labels = ["title","body","FROM_UNIXTIME"]
+labels = ["ProductId","SupplierId","Name","Category","Description","Features"]
 
 fields = [StructField(field_name, StringType(), True) for field_name in labels]
 schema = StructType(fields)
 
 # Loads data.
-data_df = spark.read.csv("/home/marcos/code/data/noticias_small.csv", schema=schema)
+data_df = spark.read.csv("/home/marcos/code/machine-learning/data/catalogo20161017_1716.csv", schema=schema, sep=";")
 #.map(lambda row: row.split("\r\n"))
 print(data_df)
 
-tokenizer = Tokenizer(inputCol="body", outputCol="words")
+tokenizer = Tokenizer(inputCol="Name", outputCol="words")
 wordsDataFrame = tokenizer.transform(data_df)
 
 stopWords = StopWordsRemover.loadDefaultStopWords("portuguese")
@@ -33,7 +34,7 @@ df_vect = cv_tmp_model.transform(wordsFiltered)
 def parseVectors(line):
     return [int(line[2]), line[1]]
 
-sparsevector = df_vect.select("FROM_UNIXTIME", "tmp_vectors")
+sparsevector = df_vect.select("ProductId", "tmp_vectors")
 
 lda = LDA(k=10, maxIter=5, featuresCol="tmp_vectors")
 ldaModel = lda.fit(sparsevector)
@@ -43,7 +44,7 @@ topics = ldaModel.topicsMatrix()
 # Describe topics.
 topics = ldaModel.describeTopics(3)
 # print("The topics described by their top-weighted terms:")
-# topics.show(truncate=False)
+topics.show(truncate=False)
 
 # ldaModel.describeTopics(3)
 topics\
